@@ -1,0 +1,9 @@
+# Pinned after verified install on 2026-09-30 (Python 3.12, CPU).
+av==19.0.0
+chromadb==1.5.9
+fastapi==0.142.0
+faster-whisper==1.2.1
+google-generativeai==0.8.6
+numpy==2.5.3
+python-multipart==0.0.32
+uvicorn==0.54.0

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: interview-coach
+    runtime: python
+    plan: free
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      WHISPER_MODEL=tiny python -c "from backend.stt import _get_model; _get_model();
+      from chromadb.utils.embedding_functions import DefaultEmbeddingFunction;
+      DefaultEmbeddingFunction()(['warmup'])"
+    startCommand: "WHISPER_MODEL=tiny uvicorn backend.app:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: WHISPER_MODEL
+        value: tiny

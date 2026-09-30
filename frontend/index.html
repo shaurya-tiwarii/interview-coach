@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interview Coach - AI Mock Interview Practice</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap masthead-in">
+    <button class="brand" id="brandHome"><span class="brand-mark" aria-hidden="true"></span>Interview&nbsp;Coach</button>
+    <nav>
+      <button class="navbtn" data-screen="setup">Practice</button>
+      <button class="navbtn" data-screen="dashboard">Dashboard</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ SETUP ============ -->
+  <section id="screen-setup" class="screen active">
+    <p class="kicker">Mock examination &middot; AI/DS mini project</p>
+    <h1 class="display">Walk in <em>prepared.</em></h1>
+    <p class="lede">Pick a role, answer out loud, and get marked on content, clarity and confidence, with speech analytics on every answer. Recorded audio is uploaded to the app for transcription and stored with your session history on the server.</p>
+
+    <div class="secnum"><span>01</span><h2>Choose your role</h2></div>
+    <div class="role-grid" id="roleCards">
+      <button class="role-card selected" data-role="software_engineer">
+        <span class="rc-num">i.</span>
+        <h3>Software Engineer</h3>
+        <p>DSA, system design, core CS and behavioral</p>
+      </button>
+      <button class="role-card" data-role="data_analyst">
+        <span class="rc-num">ii.</span>
+        <h3>Data Analyst</h3>
+        <p>SQL, statistics, business cases and visualization</p>
+      </button>
+      <button class="role-card" data-role="hr_general">
+        <span class="rc-num">iii.</span>
+        <h3>HR / General</h3>
+        <p>Communication, situational and motivation</p>
+      </button>
+    </div>
+
+    <div class="secnum"><span>02</span><h2>Difficulty</h2></div>
+    <div class="pills" id="diffPills">
+      <button class="pill" data-diff="easy">Easy</button>
+      <button class="pill selected" data-diff="mixed">Mixed</button>
+      <button class="pill" data-diff="hard">Hard</button>
+    </div>
+
+    <div class="secnum"><span>03</span><h2>Begin</h2></div>
+    <button class="btn-solid" id="startBtn">Start mock interview <span class="arr" aria-hidden="true">&rarr;</span></button>
+    <p class="hint" id="setupHint" role="alert"></p>
+
+    <aside class="colophon">
+      <p class="micro">How marking works</p>
+      <p>Five questions per session. Each answer is transcribed on your machine, timed, and checked for filler words. An examiner model scores content, clarity and confidence out of ten when an API key is set; without one, you still get the full transcript and speech analytics.</p>
+    </aside>
+  </section>
+
+  <!-- ============ INTERVIEW ============ -->
+  <section id="screen-interview" class="screen">
+    <div class="secnum"><span>01</span><h2>Interview</h2></div>
+    <p class="qmeta" id="qMeta">Question 1 of 5 &middot; <span id="qDim"></span></p>
+    <div class="progress" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+    <p class="question" id="qText"></p>
+
+    <div class="reczone">
+      <button id="recBtn" class="recbtn" aria-label="Record answer"><span class="recdot" aria-hidden="true"></span></button>
+      <p class="rec-label" id="recLabel">Tap to record your answer</p>
+      <p id="recTimer" class="timer hidden">0:00</p>
+    </div>
+
+    <div id="answerPane" class="pane hidden">
+      <p class="micro">Your answer, as transcribed</p>
+      <p id="transcriptPreview" class="dictation"></p>
+      <div class="btnrow">
+        <button class="btn-solid" id="submitBtn">Submit answer</button>
+        <button class="btn-ghost" id="rerecordBtn">Re-record</button>
+      </div>
+    </div>
+
+    <div id="resultPane" class="pane hidden">
+      <p class="micro">Examiner's marks <span id="llmBadge" class="badge"></span></p>
+      <div id="dials" class="scores"></div>
+      <div id="metricsRow" class="statgrid"></div>
+      <p class="micro">Remarks</p>
+      <p id="feedbackText" class="remarks"></p>
+      <div class="btnrow">
+        <button class="btn-solid" id="nextBtn">Next question <span class="arr" aria-hidden="true">&rarr;</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ REPORT ============ -->
+  <section id="screen-report" class="screen">
+    <p class="kicker">Session report</p>
+    <h1 class="display" id="reportTitle">How you did</h1>
+    <p class="lede" id="reportSub"></p>
+
+    <div class="secnum"><span>01</span><h2>Dimension averages</h2></div>
+    <div id="avgBars" class="scores paper"></div>
+
+    <div class="secnum"><span>02</span><h2>Score trend</h2></div>
+    <div class="spark-panel">
+      <p class="micro">Overall score per answer, out of ten</p>
+      <div id="reportSpark"></div>
+    </div>
+
+    <div class="secnum"><span>03</span><h2>Every answer</h2></div>
+    <div id="turnList" class="turns"></div>
+
+    <div class="btnrow">
+      <button class="btn-solid" id="againBtn">Practice again</button>
+      <button class="btn-ghost" id="dashBtn2">Dashboard</button>
+    </div>
+  </section>
+
+  <!-- ============ DASHBOARD ============ -->
+  <section id="screen-dashboard" class="screen">
+    <p class="kicker">Dashboard</p>
+    <h1 class="display">Your progress</h1>
+    <p class="lede">Session history and speech-analytics trends across every mock interview. Select a session to inspect its trends.</p>
+
+    <div class="secnum"><span>01</span><h2>Sessions</h2></div>
+    <div id="historyList" class="sessions"></div>
+
+    <div class="secnum"><span>02</span><h2>Trends <span class="dim" id="trendSessionLabel"></span></h2></div>
+    <div class="spark-panel">
+      <p class="micro">Overall score per answer, out of ten</p>
+      <div id="sparkScore"></div>
+    </div>
+    <div class="spark-panel">
+      <p class="micro">Words per minute</p>
+      <div id="sparkWpm"></div>
+    </div>
+    <div class="spark-panel">
+      <p class="micro">Filler words per 100 words</p>
+      <div id="sparkFiller"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="colophon-foot">
+  <div class="wrap">
+    <p>Interview Coach &middot; a local practice tool for the AI/DS mini project &middot; runs on localhost</p>
+  </div>
+</footer>
+
+<div id="loader" class="loader hidden" role="status">
+  <div class="loadbar"><span></span></div>
+  <p id="loaderText">Transcribing...</p>
+</div>
+<div id="toast" class="toast hidden" role="alert"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

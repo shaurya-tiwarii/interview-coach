@@ -1,0 +1,12 @@
+# Python 3.10 (Windows) variant.
+# Same app, same versions where possible; av and numpy are stepped down to the
+# newest releases that still ship cp310 win_amd64 wheels (av 19.0.0 and
+# numpy 2.5.3 both require Python >= 3.12).
+av==17.1.0
+chromadb==1.5.9
+fastapi==0.142.0
+faster-whisper==1.2.1
+google-generativeai==0.8.6
+numpy==2.2.6
+python-multipart==0.0.32
+uvicorn==0.54.0
