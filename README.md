@@ -1,8 +1,9 @@
 # AI Mock Interview Coach
 
-A local web app for AI&DS mini-project review: conducts role-specific mock
-interviews, transcribes spoken answers locally, scores them with an LLM judge,
-computes speech analytics, and picks follow-up questions with vector retrieval.
+A web app that conducts role-specific mock interviews, transcribes spoken
+answers locally, scores them with an LLM judge, computes speech analytics,
+and picks follow-up questions with vector retrieval. Accounts keep every
+user's rounds, scores and history private to them.
 
 ## Setup
 
@@ -61,34 +62,51 @@ hundred MB, not gigabytes.
 
 | Method | Endpoint | Description |
 |---|---|---|
+| POST | `/api/auth/register` | `{name, email, password}` → creates account, sets session cookie |
+| POST | `/api/auth/login` | `{email, password}` → sets session cookie |
+| POST | `/api/auth/logout` | clears the session |
+| GET | `/api/auth/me` | current user (401 when logged out) |
+| PATCH | `/api/auth/me` | `{name}` → update profile |
+| POST | `/api/auth/password` | `{current_password, new_password}` |
+| DELETE | `/api/auth/account` | deletes the account and all its data |
+| GET | `/api/stats` | dashboard aggregates for the logged-in user |
 | POST | `/api/sessions` | `{role, difficulty}` → session + first question |
 | POST | `/api/sessions/{id}/answer` | multipart `audio` → transcript, metrics, scores, feedback, next question |
 | GET | `/api/sessions/{id}/report` | per-turn detail + dimension averages + trends |
 | GET | `/api/sessions` | history list (role, date, avg score) |
 | GET | `/api/health` | liveness check |
 
+Auth is a secure HttpOnly cookie (`ic_session`); every `/api/sessions*` route
+requires login and is scoped to the logged-in user (another user's session id
+returns 404). Set `COOKIE_SECURE=1` in production so the cookie is HTTPS-only.
+
 Roles: `software_engineer`, `data_analyst`, `hr_general`.
 Difficulty: `easy`, `mixed`, `hard`. Sessions run 5 questions (`TOTAL_TURNS`).
 
-### Try the API (review-day demo)
+### Try the API (needs an account; sessions are per-user)
 
 ```bash
+# 0. register (stores the session cookie in cookies.txt)
+curl -s -c cookies.txt -X POST localhost:8010/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Demo","email":"demo@example.com","password":"demo-pass-123"}'
+
 # 1. create a session
-curl -s -X POST localhost:8010/api/sessions \
+curl -s -b cookies.txt -X POST localhost:8010/api/sessions \
   -H 'Content-Type: application/json' \
   -d '{"role":"software_engineer","difficulty":"mixed"}'
 # -> {"session_id":"...","turn":1,"total_turns":5,"question":{...}}
 
 # 2. answer with an audio file (wav/mp3/webm)
 SID=<session_id from step 1>
-curl -s -X POST localhost:8010/api/sessions/$SID/answer \
+curl -s -b cookies.txt -X POST localhost:8010/api/sessions/$SID/answer \
   -F "audio=@/path/to/answer.wav" | python3 -m json.tool
 # -> transcript, wpm, filler stats, scores (null + llm_not_configured without a key),
 #    feedback, and the next question. Repeat for turns 2-5.
 
 # 3. session report and history
-curl -s localhost:8010/api/sessions/$SID/report | python3 -m json.tool
-curl -s localhost:8010/api/sessions | python3 -m json.tool
+curl -s -b cookies.txt localhost:8010/api/sessions/$SID/report | python3 -m json.tool
+curl -s -b cookies.txt localhost:8010/api/sessions | python3 -m json.tool
 ```
 
 To use a `.env` file: `set -a; source .env; set +a` before starting uvicorn.

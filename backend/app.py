@@ -5,18 +5,20 @@ Run locally:  uvicorn backend.app:app --port 8010
 """
 import logging
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 
-from . import analytics, db
+from . import analytics, auth, db
+from .auth import get_current_user
 from .evaluator import evaluate
 from .questions import QuestionBank
 from .schemas import (
-    AnswerResponse, CreateSessionRequest, CreateSessionResponse,
-    FillerStats, QuestionOut, ReportResponse, ScoresOut,
-    SessionSummary, TurnReport,
+    AnswerResponse, ChangePasswordRequest, CreateSessionRequest, CreateSessionResponse,
+    FillerStats, LoginRequest, QuestionOut, RegisterRequest, ReportResponse, ScoresOut,
+    SessionSummary, TurnReport, UpdateProfileRequest, UserOut, UserStats,
 )
 from .stt import transcribe
 
@@ -40,6 +42,10 @@ def _qout(q: dict) -> QuestionOut:
                        dimension=q["dimension"], difficulty=q["difficulty"])
 
 
+def _user_out(u) -> UserOut:
+    return UserOut(id=u["id"], name=u["name"], email=u["email"], created_at=u["created_at"])
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
@@ -49,18 +55,83 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Mock Interview Coach", lifespan=lifespan)
 
 
+# ---------------- auth ----------------
+
+@app.post("/api/auth/register", response_model=UserOut, status_code=201)
+def register(req: RegisterRequest, response: Response):
+    if db.get_user_by_email(req.email):
+        raise HTTPException(409, "an account with this email already exists")
+    try:
+        uid = db.create_user(req.name.strip(), req.email.strip(), auth.hash_password(req.password))
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "an account with this email already exists")
+    user = db.get_user(uid)
+    auth.issue_session(response, uid)
+    return _user_out(user)
+
+
+@app.post("/api/auth/login", response_model=UserOut)
+def login(req: LoginRequest, response: Response):
+    user = db.get_user_by_email(req.email)
+    if not user or not auth.verify_password(req.password, user["password_hash"]):
+        raise HTTPException(401, "invalid email or password")
+    auth.issue_session(response, user["id"])
+    return _user_out(user)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    auth.clear_session(response, request)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me", response_model=UserOut)
+def me(user: dict = Depends(get_current_user)):
+    return _user_out(user)
+
+
+@app.patch("/api/auth/me", response_model=UserOut)
+def update_profile(req: UpdateProfileRequest, user: dict = Depends(get_current_user)):
+    db.update_user_name(user["id"], req.name.strip())
+    return _user_out(db.get_user(user["id"]))
+
+
+@app.post("/api/auth/password")
+def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    fresh = db.get_user(user["id"])
+    if not auth.verify_password(req.current_password, fresh["password_hash"]):
+        raise HTTPException(400, "current password is incorrect")
+    db.set_user_password(user["id"], auth.hash_password(req.new_password))
+    return {"ok": True}
+
+
+@app.delete("/api/auth/account")
+def delete_account(request: Request, response: Response, user: dict = Depends(get_current_user)):
+    db.delete_user_everything(user["id"])
+    auth.clear_session(response, request)
+    return {"ok": True}
+
+
+@app.get("/api/stats", response_model=UserStats)
+def stats(user: dict = Depends(get_current_user)):
+    return UserStats(**db.user_stats(user["id"]))
+
+
+# ---------------- interview sessions (per-user) ----------------
+
 @app.post("/api/sessions", response_model=CreateSessionResponse)
-def create_session(req: CreateSessionRequest):
+def create_session(req: CreateSessionRequest, user: dict = Depends(get_current_user)):
     bank = get_bank(req.role)
-    sid = db.create_session(req.role, req.difficulty)
+    sid = db.create_session(req.role, req.difficulty, user["id"])
     q = bank.first_question(req.difficulty)
     return CreateSessionResponse(
         session_id=sid, turn=1, total_turns=TOTAL_TURNS, question=_qout(q))
 
 
 @app.post("/api/sessions/{sid}/answer", response_model=AnswerResponse)
-async def submit_answer(sid: str, audio: UploadFile = File(...)):
-    sess = db.get_session(sid)
+async def submit_answer(sid: str, audio: UploadFile = File(...),
+                        user: dict = Depends(get_current_user)):
+    sess = db.get_user_session(sid, user["id"])
     if not sess:
         raise HTTPException(404, "session not found")
     if sess["status"] != "active":
@@ -121,8 +192,8 @@ async def submit_answer(sid: str, audio: UploadFile = File(...)):
 
 
 @app.get("/api/sessions/{sid}/report", response_model=ReportResponse)
-def session_report(sid: str):
-    sess = db.get_session(sid)
+def session_report(sid: str, user: dict = Depends(get_current_user)):
+    sess = db.get_user_session(sid, user["id"])
     if not sess:
         raise HTTPException(404, "session not found")
     turns = db.get_turns(sid)
@@ -149,7 +220,7 @@ def session_report(sid: str):
 
 
 @app.get("/api/sessions", response_model=list[SessionSummary])
-def session_history():
+def session_history(user: dict = Depends(get_current_user)):
     return [
         SessionSummary(
             session_id=s["id"], role=s["role"], difficulty=s["difficulty"],
@@ -157,7 +228,7 @@ def session_history():
             turns_answered=s["turns_answered"],
             avg_overall=(round(s["avg_overall"], 2) if s["avg_overall"] is not None else None),
         )
-        for s in db.list_sessions()
+        for s in db.list_sessions(user["id"])
     ]
 
 

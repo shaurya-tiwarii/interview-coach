@@ -83,3 +83,44 @@ class SessionSummary(BaseModel):
     created_at: str
     turns_answered: int
     avg_overall: Optional[float] = None
+
+
+# ---------------- auth ----------------
+
+EMAIL_RE = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
+class RegisterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    email: str = Field(pattern=EMAIL_RE, max_length=254)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(pattern=EMAIL_RE, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class UserOut(BaseModel):
+    id: str
+    name: str
+    email: str
+    created_at: str
+
+
+class UpdateProfileRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class UserStats(BaseModel):
+    sessions_total: int
+    sessions_completed: int
+    answers_total: int
+    avg_overall: Optional[float] = None
+    avg_wpm: Optional[float] = None
+    total_minutes: float
