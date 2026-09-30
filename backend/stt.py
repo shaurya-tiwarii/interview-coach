@@ -12,11 +12,11 @@ natively accepts numpy arrays.
 """
 import gc
 import io
-import itertools
 import logging
 import os
 
 import av
+import av.error
 import numpy as np
 
 log = logging.getLogger(__name__)
@@ -36,32 +36,36 @@ def _get_model():
 
 
 def _decode_audio_16k_mono(path: str) -> np.ndarray:
-    """Decode any audio file to 16 kHz mono float32, like faster-whisper does."""
+    """Decode any audio file to 16 kHz mono float32, like faster-whisper does.
+
+    NOTE: with PyAV >= 12 the resampler is a filter graph that enters EOF
+    state once flushed. Flushing mid-stream (after every 500k-sample chunk)
+    makes the *next* chunk raise av.error.EOFError, which broke every
+    recording longer than ~10s. So frames are pushed chunk by chunk but the
+    resampler is flushed exactly once, at the very end.
+    """
     resampler = av.audio.resampler.AudioResampler(
         format="s16", layout="mono", rate=16000)
     raw_buffer = io.BytesIO()
     dtype = None
 
+    def _drain(frame):
+        nonlocal dtype
+        for rf in resampler.resample(frame):
+            arr = rf.to_ndarray()
+            dtype = arr.dtype
+            raw_buffer.write(arr)
+
     with av.open(path, mode="r") as container:
         fifo = av.audio.fifo.AudioFifo()
-        frames = container.decode(audio=0)
-        for frame in frames:
+        for frame in container.decode(audio=0):
             frame.pts = None  # ignore timestamp check
             fifo.write(frame)
             if fifo.samples >= 500000:
-                out = fifo.read()
-                for r in itertools.chain([out], [None]):
-                    for rf in resampler.resample(r):
-                        arr = rf.to_ndarray()
-                        dtype = arr.dtype
-                        raw_buffer.write(arr)
-        if fifo.samples > 0:
-            out = fifo.read()
-            for rf in itertools.chain([out], [None]):
-                for rrf in resampler.resample(rf):
-                    arr = rrf.to_ndarray()
-                    dtype = arr.dtype
-                    raw_buffer.write(arr)
+                _drain(fifo.read())
+        while fifo.samples > 0:
+            _drain(fifo.read())
+    _drain(None)  # final flush, once
 
     del resampler
     gc.collect()
@@ -73,10 +77,20 @@ def _decode_audio_16k_mono(path: str) -> np.ndarray:
 
 
 def transcribe(audio_path: str) -> tuple[str, float]:
-    """Transcribe an audio file. Returns (transcript_text, duration_seconds)."""
-    model = _get_model()
-    waveform = _decode_audio_16k_mono(audio_path)
+    """Transcribe an audio file. Returns (transcript_text, duration_seconds).
+
+    An unreadable upload (empty/truncated blob) is treated as silence and
+    follows the graceful empty-transcript path instead of 500ing.
+    """
+    try:
+        waveform = _decode_audio_16k_mono(audio_path)
+    except (av.error.FFmpegError, OSError) as e:
+        log.warning("unreadable audio %s (%s); treating as silence", audio_path, e)
+        return "", 0.0
     duration = round(len(waveform) / 16000, 2)
+    if len(waveform) == 0:
+        return "", 0.0
+    model = _get_model()
     segments, _info = model.transcribe(waveform, beam_size=5)
     text = " ".join(seg.text.strip() for seg in segments).strip()
     return text, duration
