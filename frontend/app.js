@@ -9,7 +9,10 @@ const $ = id => document.getElementById(id);
 const state = {
   user: null, authChecked: false, afterLogin: null,
   role: 'software_engineer', difficulty: 'mixed',
+  domain: '', company: '', experience: '',
+  domainsByRole: null,
   sessionId: null, turn: 1, totalTurns: 5,
+  answerMode: 'speak', writeDraft: '', writeStart: 0,
   mediaRecorder: null, audioChunks: [], audioBlob: null,
   recStart: 0, timerInt: null,
 };
@@ -21,6 +24,10 @@ const ROLE_BLURBS = {
   hr_general: 'Behavioral questions and communication.',
 };
 const DIM_LABELS = { content_relevance: 'Content', clarity_structure: 'Clarity', confidence: 'Confidence' };
+function dimLabel(slug) {
+  return String(slug || '').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+const EXPERIENCE_LABELS = { fresher: 'Fresher', '0-1': '0-1 years', '1-3': '1-3 years', '3plus': '3+ years' };
 
 /* ============ helpers ============ */
 function escapeHtml(s) {
@@ -204,7 +211,7 @@ function viewLanding(view) {
     '<p class="kicker">Features</p>' +
     '<h2 class="h-2xl" style="max-width:20ch">Everything a practice round should give you.</h2>' +
     '<div class="feat-grid">' +
-      feat('01', 'Speak your answers', 'Hit record and talk it out. No typing, no multiple choice, just you thinking out loud under pressure.') +
+      feat('01', 'Speak or write your answers', 'Hit record and talk it out, or switch to Write and type it. No multiple choice, just you thinking under pressure.') +
       feat('02', 'Transcribed by Whisper', 'Every answer is transcribed word for word, so you can read exactly what the interviewer would hear.') +
       feat('03', 'Scored like an examiner', 'An AI rubric grades content, clarity and confidence out of 10, with written feedback on each answer.') +
       feat('04', 'Speech analytics', 'Words per minute, filler-word rate and answer duration, tracked across every question you attempt.') +
@@ -345,6 +352,18 @@ async function viewDashboard(view) {
         '<button class="pill' + (state.difficulty === d ? ' selected' : '') + '" data-diff="' + d + '">' +
         d[0].toUpperCase() + d.slice(1) + '</button>').join('') +
     '</div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label for="domainSelect">Domain</label>' +
+      '<select class="input" id="domainSelect"><option value="">All domains</option></select></div>' +
+      '<div class="field"><label for="companyInput">Target company (optional)</label>' +
+      '<input class="input" id="companyInput" type="text" maxlength="80" placeholder="e.g. Acme Corp" value="' + escapeHtml(state.company) + '"></div>' +
+      '<div class="field"><label for="expSelect">Experience (optional)</label>' +
+      '<select class="input" id="expSelect">' +
+        '<option value="">Not specified</option>' +
+        Object.keys(EXPERIENCE_LABELS).map(k =>
+          '<option value="' + k + '"' + (state.experience === k ? ' selected' : '') + '>' + EXPERIENCE_LABELS[k] + '</option>').join('') +
+      '</select></div>' +
+    '</div>' +
     '<button class="btn btn-primary" id="startBtn">Start interview <span class="arr">&rarr;</span></button>' +
     '<p class="muted" id="setupHint" style="margin-top:0.9rem;font-size:var(--t-sm)"></p>' +
   '</div>' +
@@ -354,13 +373,36 @@ async function viewDashboard(view) {
   view.querySelectorAll('#roleCards .role-card').forEach(c => c.addEventListener('click', () => {
     view.querySelectorAll('#roleCards .role-card').forEach(x => x.classList.remove('selected'));
     c.classList.add('selected'); state.role = c.dataset.role;
+    state.domain = ''; refreshDomainOptions();
   }));
   view.querySelectorAll('#diffPills .pill').forEach(p => p.addEventListener('click', () => {
     view.querySelectorAll('#diffPills .pill').forEach(x => x.classList.remove('selected'));
     p.classList.add('selected'); state.difficulty = p.dataset.diff;
   }));
+  $('domainSelect').addEventListener('change', e => { state.domain = e.target.value; });
+  $('companyInput').addEventListener('input', e => { state.company = e.target.value; });
+  $('expSelect').addEventListener('change', e => { state.experience = e.target.value; });
+  refreshDomainOptions();
+  loadDomains().then(refreshDomainOptions);
   $('startBtn').addEventListener('click', startInterview);
   loadStatsAndHistory(view);
+}
+
+function refreshDomainOptions() {
+  const sel = $('domainSelect');
+  if (!sel) return;
+  const dims = (state.domainsByRole && state.domainsByRole[state.role]) || [];
+  sel.innerHTML = '<option value="">All domains</option>' +
+    dims.map(d => '<option value="' + escapeHtml(d) + '"' + (state.domain === d ? ' selected' : '') + '>' + escapeHtml(dimLabel(d)) + '</option>').join('');
+  const hint = $('setupHint');
+  if (hint) hint.textContent = state.domain
+    ? 'Focused on ' + dimLabel(state.domain) + '. If the bank runs short on this domain, later questions widen out.'
+    : '';
+}
+
+async function loadDomains() {
+  try { state.domainsByRole = await api('/api/domains'); }
+  catch (e) { state.domainsByRole = null; }
 }
 
 async function loadStatsAndHistory(view) {
@@ -381,7 +423,10 @@ async function loadStatsAndHistory(view) {
     hl.innerHTML = sessions.map(s =>
       '<button class="hrow" data-sid="' + s.session_id + '"><div>' +
       '<div class="hrole">' + escapeHtml(ROLE_NAMES[s.role] || s.role) + '</div>' +
-      '<div class="hmeta">' + escapeHtml(s.difficulty) + ' &middot; ' + s.turns_answered + ' answers &middot; ' +
+      '<div class="hmeta">' + escapeHtml(s.difficulty) +
+      (s.domain ? ' &middot; ' + escapeHtml(dimLabel(s.domain)) : '') +
+      (s.company ? ' &middot; ' + escapeHtml(s.company) : '') +
+      ' &middot; ' + s.turns_answered + ' answers &middot; ' +
       escapeHtml(s.status) + ' &middot; ' + escapeHtml(fmtDate(s.created_at)) + '</div></div>' +
       '<div class="hscore">' + (s.avg_overall == null ? '<span class="na">--</span>' : s.avg_overall.toFixed(1)) +
       '<small>avg / 10</small></div></button>').join('');
@@ -403,7 +448,8 @@ async function startInterview() {
   try {
     const d = await api('/api/sessions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: state.role, difficulty: state.difficulty }),
+      body: JSON.stringify({ role: state.role, difficulty: state.difficulty,
+        domain: state.domain, company: state.company.trim(), experience: state.experience }),
     });
     state.sessionId = d.session_id; state.turn = d.turn; state.totalTurns = d.total_turns;
     state.afterQuestion = d.question;
@@ -428,6 +474,17 @@ function viewInterview(view) {
     '<div class="card q-card rise rise-1"><span class="qnum" id="qNum"></span><h2 id="qText"></h2>' +
     '<div class="qdim" id="qDim"></div></div>' +
     '<div class="card rec-zone rise rise-2">' +
+      '<div class="mode-toggle" role="tablist" aria-label="Answer mode">' +
+        '<button class="pill mode-pill' + (state.answerMode === 'speak' ? ' selected' : '') + '" data-mode="speak">Speak</button>' +
+        '<button class="pill mode-pill' + (state.answerMode === 'write' ? ' selected' : '') + '" data-mode="write">Write</button>' +
+      '</div>' +
+      '<div id="speakPane">' +
+      '<div class="speak-tips"><h3>Before you speak</h3><ul>' +
+        '<li>Sit in a quiet, closed room. Switch off the fan, TV, and music if you can.</li>' +
+        '<li>Wear earphones or headphones with a mic, and keep the mic close to your mouth.</li>' +
+        '<li>Speak at your natural pace, clearly, like the interviewer is across the table.</li>' +
+        '<li>Tap the mic to start, tap again to stop. You can re-record before submitting.</li>' +
+      '</ul></div>' +
       '<button class="mic" id="recBtn" aria-label="Record answer">' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg></button>' +
       '<div class="rec-label" id="recLabel">Tap to record your answer</div>' +
@@ -440,14 +497,53 @@ function viewInterview(view) {
           '<button class="btn btn-primary" id="submitBtn">Submit answer <span class="arr">&rarr;</span></button>' +
         '</div>' +
       '</div>' +
+      '</div>' +
+      '<div id="writePane" class="hidden" style="width:100%">' +
+        '<label class="field-label" for="writeBox">Write your answer</label>' +
+        '<textarea class="input write-area" id="writeBox" rows="6" maxlength="5000" placeholder="Type your answer here, as you would say it in the interview."></textarea>' +
+        '<div class="write-meta"><span id="writeCount">0 words</span><span>Writing time counts toward your words per minute.</span></div>' +
+        '<div class="answer-actions" style="justify-content:center">' +
+          '<button class="btn btn-primary" id="submitWriteBtn">Submit written answer <span class="arr">&rarr;</span></button>' +
+        '</div>' +
+      '</div>' +
     '</div>' +
     '<div class="card result-pane hidden rise" id="resultPane"></div>' +
   '</div>';
 
   showQuestion(q);
+  view.querySelectorAll('.mode-pill').forEach(p => p.addEventListener('click', () => {
+    if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopRecording();
+    state.answerMode = p.dataset.mode;
+    view.querySelectorAll('.mode-pill').forEach(x => x.classList.toggle('selected', x === p));
+    applyAnswerMode();
+  }));
   $('recBtn').addEventListener('click', toggleRecording);
   $('rerecordBtn').addEventListener('click', () => { $('answerPane').classList.add('hidden'); resetRecUI(); });
   $('submitBtn').addEventListener('click', submitAnswer);
+  $('writeBox').addEventListener('input', () => {
+    state.writeDraft = $('writeBox').value;
+    $('writeCount').textContent = wordCount(state.writeDraft) + ' words';
+  });
+  $('submitWriteBtn').addEventListener('click', submitWrittenAnswer);
+  applyAnswerMode();
+}
+
+function wordCount(text) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  return words.length;
+}
+
+function applyAnswerMode() {
+  const speak = $('speakPane'), write = $('writePane');
+  if (!speak || !write) return;
+  const writing = state.answerMode === 'write';
+  speak.classList.toggle('hidden', writing);
+  write.classList.toggle('hidden', !writing);
+  if (writing) {
+    const box = $('writeBox');
+    if (box) { box.value = state.writeDraft; $('writeCount').textContent = wordCount(state.writeDraft) + ' words'; }
+    if (!state.writeStart) state.writeStart = Date.now();
+  }
 }
 
 function showQuestion(q) {
@@ -461,7 +557,9 @@ function showQuestion(q) {
   $('progressFill').style.width = ((state.turn - 1) / state.totalTurns * 100) + '%';
   $('answerPane').classList.add('hidden');
   $('resultPane').classList.add('hidden');
+  state.writeDraft = ''; state.writeStart = Date.now();
   resetRecUI();
+  applyAnswerMode();
 }
 
 function resetRecUI() {
@@ -525,6 +623,26 @@ async function submitAnswer() {
   } finally { hideLoader(); }
 }
 
+async function submitWrittenAnswer() {
+  const text = ($('writeBox') ? $('writeBox').value : state.writeDraft).trim();
+  if (!text) { toast('Write an answer first.'); return; }
+  const writingSec = state.writeStart ? (Date.now() - state.writeStart) / 1000 : 0;
+  showLoader('Scoring your written answer...');
+  try {
+    const fd = new FormData();
+    fd.append('text', text);
+    fd.append('writing_sec', String(writingSec));
+    const r = await fetch('/api/sessions/' + state.sessionId + '/answer',
+      { method: 'POST', body: fd, credentials: 'include' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((d && d.detail) || ('Server error ' + r.status));
+    state.turn = d.turn;
+    renderResult(d);
+  } catch (e) {
+    toast('Submit failed: ' + e.message);
+  } finally { hideLoader(); }
+}
+
 /* score bars */
 function scoreRow(label, value) {
   const pct = value == null ? 0 : Math.max(0, Math.min(10, value)) / 10 * 100;
@@ -560,15 +678,17 @@ function renderResult(d) {
     ? '<span class="badge ok">AI scored</span>'
     : '<span class="badge warn">' + escapeHtml(d.llm_status === 'llm_not_configured' ? 'AI scoring off, no API key' : 'AI scoring unavailable') + '</span>';
   const s = d.scores || {};
+  const written = d.answer_mode === 'written';
   const pane = $('resultPane');
   pane.innerHTML = badge +
+    (written ? '<span class="badge">Written answer</span>' : '<span class="badge">Spoken answer</span>') +
     '<div id="dials">' +
     scoreRow('Content', s.content_relevance != null ? s.content_relevance : null) +
     scoreRow('Clarity', s.clarity_structure != null ? s.clarity_structure : null) +
     scoreRow('Confidence', s.confidence != null ? s.confidence : null) + '</div>' +
     '<div class="metric-grid">' +
-      '<div class="metric"><b>' + d.wpm + '</b><span>Words per minute</span></div>' +
-      '<div class="metric"><b>' + d.duration_sec.toFixed(1) + 's</b><span>Duration</span></div>' +
+      '<div class="metric"><b>' + d.wpm + '</b><span>Words per minute' + (written ? ' (writing)' : '') + '</span></div>' +
+      '<div class="metric"><b>' + d.duration_sec.toFixed(1) + 's</b><span>' + (written ? 'Writing time' : 'Duration') + '</span></div>' +
       '<div class="metric"><b>' + d.filler.count + '</b><span>Fillers, ' + d.filler.rate_per_100w + ' per 100 words</span></div>' +
     '</div>' +
     '<p class="feedback">' + escapeHtml(d.feedback || 'No feedback available.') + '</p>' +
@@ -594,7 +714,11 @@ async function viewReport(view, sid) {
   try {
     const d = await api('/api/sessions/' + encodeURIComponent(sid) + '/report');
     $('reportSub').textContent =
-      (ROLE_NAMES[d.role] || d.role) + ' - ' + d.difficulty + ' - ' + d.turns.length +
+      (ROLE_NAMES[d.role] || d.role) + ' - ' + d.difficulty +
+      (d.domain ? ' - ' + dimLabel(d.domain) : '') +
+      (d.company ? ' - ' + d.company : '') +
+      (d.experience ? ' - ' + (EXPERIENCE_LABELS[d.experience] || d.experience) : '') +
+      ' - ' + d.turns.length +
       ' questions - ' + fmtDate(d.created_at);
     const av = d.averages || {};
     const body = $('reportBody');
@@ -637,9 +761,10 @@ function turnHtml(t) {
     : '<span class="tscore">not AI-scored (' + escapeHtml(t.llm_status) + ')</span>';
   return '<div class="turn"><h4><span class="qn">Q' + t.n + '.</span>' + escapeHtml(t.question) + '</h4>' +
     '<div class="tmeta">' + escapeHtml(t.dimension.replace(/_/g, ' ')) + ' - ' + escapeHtml(t.difficulty) +
-    ' - ' + t.wpm + ' WPM - ' + t.filler_count + ' fillers - ' + t.duration_sec.toFixed(1) + 's</div>' +
+    ' - ' + (t.answer_mode === 'written' ? 'written' : 'spoken') +
+    ' - ' + t.wpm + ' WPM' + (t.answer_mode === 'written' ? ' (writing)' : '') + ' - ' + t.filler_count + ' fillers - ' + t.duration_sec.toFixed(1) + 's</div>' +
     '<div class="tscores">' + chips + '</div>' +
-    '<p class="ttrans">&ldquo;' + escapeHtml(t.transcript || '(no speech transcribed)') + '&rdquo;</p>' +
+    '<p class="ttrans">&ldquo;' + escapeHtml(t.transcript || (t.answer_mode === 'written' ? '(no answer written)' : '(no speech transcribed)')) + '&rdquo;</p>' +
     (t.feedback ? '<p class="tfb">' + escapeHtml(t.feedback) + '</p>' : '') + '</div>';
 }
 

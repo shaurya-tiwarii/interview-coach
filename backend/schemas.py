@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field
 class CreateSessionRequest(BaseModel):
     role: str = Field(pattern=r"^(software_engineer|data_analyst|hr_general)$")
     difficulty: str = Field(default="mixed", pattern=r"^(easy|mixed|hard)$")
+    # Optional setup fields. domain is one dimension slug from the role's
+    # question bank ("" means all domains); company is free text.
+    domain: str = Field(default="", max_length=40)
+    company: str = Field(default="", max_length=80)
+    experience: str = Field(default="", pattern=r"^(fresher|0-1|1-3|3plus|)$")
 
 
 class QuestionOut(BaseModel):
@@ -37,6 +42,7 @@ class ScoresOut(BaseModel):
 class AnswerResponse(BaseModel):
     turn: int
     transcript: str
+    answer_mode: str = "spoken"
     duration_sec: float
     wpm: float
     filler: FillerStats
@@ -54,6 +60,7 @@ class TurnReport(BaseModel):
     dimension: str
     difficulty: str
     transcript: str
+    answer_mode: str = "spoken"
     duration_sec: float
     wpm: float
     filler_count: int
@@ -67,6 +74,9 @@ class ReportResponse(BaseModel):
     session_id: str
     role: str
     difficulty: str
+    domain: str = ""
+    company: str = ""
+    experience: str = ""
     status: str
     created_at: str
     total_turns: int
@@ -79,6 +89,9 @@ class SessionSummary(BaseModel):
     session_id: str
     role: str
     difficulty: str
+    domain: str = ""
+    company: str = ""
+    experience: str = ""
     status: str
     created_at: str
     turns_answered: int

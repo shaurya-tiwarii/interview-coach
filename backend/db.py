@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     role TEXT NOT NULL,
     difficulty TEXT NOT NULL,
+    domain TEXT NOT NULL DEFAULT '',
+    company TEXT NOT NULL DEFAULT '',
+    experience TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active',
     user_id TEXT REFERENCES users(id),
     created_at TEXT NOT NULL
@@ -42,6 +45,7 @@ CREATE TABLE IF NOT EXISTS turns (
     difficulty TEXT NOT NULL,
     transcript TEXT NOT NULL DEFAULT '',
     audio_path TEXT DEFAULT '',
+    answer_mode TEXT NOT NULL DEFAULT 'spoken',
     duration_sec REAL NOT NULL DEFAULT 0,
     wpm REAL NOT NULL DEFAULT 0,
     filler_count INTEGER NOT NULL DEFAULT 0,
@@ -70,6 +74,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if "user_id" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT REFERENCES users(id)")
+    for col in ("domain TEXT NOT NULL DEFAULT ''", "company TEXT NOT NULL DEFAULT ''",
+                "experience TEXT NOT NULL DEFAULT ''"):
+        if col.split()[0] not in cols:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {col}")
+    turn_cols = {r["name"] for r in conn.execute("PRAGMA table_info(turns)").fetchall()}
+    if "answer_mode" not in turn_cols:
+        conn.execute("ALTER TABLE turns ADD COLUMN answer_mode TEXT NOT NULL DEFAULT 'spoken'")
     # Safe to run on both fresh and migrated databases (IF NOT EXISTS).
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
 
@@ -170,12 +181,13 @@ def delete_user_everything(user_id: str) -> None:
 
 # ---------------- interview sessions ----------------
 
-def create_session(role: str, difficulty: str, user_id: str | None = None) -> str:
+def create_session(role: str, difficulty: str, user_id: str | None = None,
+                   domain: str = "", company: str = "", experience: str = "") -> str:
     sid = uuid.uuid4().hex[:12]
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, role, difficulty, status, user_id, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
-            (sid, role, difficulty, user_id, _now()),
+            "INSERT INTO sessions (id, role, difficulty, domain, company, experience, status, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+            (sid, role, difficulty, domain, company, experience, user_id, _now()),
         )
     return sid
 
@@ -198,16 +210,17 @@ def set_session_status(sid: str, status: str) -> None:
 
 def add_turn(sid: str, n: int, question: dict, transcript: str, audio_path: str,
              duration_sec: float, wpm: float, filler_count: int, filler_rate: float,
-             scores: dict | None, feedback: str, llm_status: str) -> int:
+             scores: dict | None, feedback: str, llm_status: str,
+             answer_mode: str = "spoken") -> int:
     with _connect() as conn:
         cur = conn.execute(
             """INSERT INTO turns
                (session_id, n, question, question_id, dimension, difficulty,
-                transcript, audio_path, duration_sec, wpm, filler_count, filler_rate,
+                transcript, audio_path, answer_mode, duration_sec, wpm, filler_count, filler_rate,
                 score_content, score_clarity, score_confidence, feedback, llm_status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (sid, n, question["text"], question["id"], question["dimension"], question["difficulty"],
-             transcript, audio_path, duration_sec, wpm, filler_count, filler_rate,
+             transcript, audio_path, answer_mode, duration_sec, wpm, filler_count, filler_rate,
              (scores or {}).get("content_relevance"), (scores or {}).get("clarity_structure"),
              (scores or {}).get("confidence"), feedback, llm_status, _now()),
         )

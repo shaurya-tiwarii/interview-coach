@@ -8,7 +8,7 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 
 from . import analytics, auth, db
@@ -119,50 +119,86 @@ def stats(user: dict = Depends(get_current_user)):
 
 # ---------------- interview sessions (per-user) ----------------
 
+@app.get("/api/domains")
+def domains(user: dict = Depends(get_current_user)):
+    """Question dimensions (domains) available per role, from the banks."""
+    return {role: get_bank(role).dimensions for role in
+            ("software_engineer", "data_analyst", "hr_general")}
+
+
 @app.post("/api/sessions", response_model=CreateSessionResponse)
 def create_session(req: CreateSessionRequest, user: dict = Depends(get_current_user)):
     bank = get_bank(req.role)
-    sid = db.create_session(req.role, req.difficulty, user["id"])
-    q = bank.first_question(req.difficulty)
+    if req.domain and req.domain not in bank.dimensions:
+        raise HTTPException(400, "unknown domain for this role")
+    sid = db.create_session(req.role, req.difficulty, user["id"],
+                            req.domain, req.company.strip(), req.experience)
+    q = bank.first_question(req.difficulty, req.domain or None)
     return CreateSessionResponse(
         session_id=sid, turn=1, total_turns=TOTAL_TURNS, question=_qout(q))
 
 
 @app.post("/api/sessions/{sid}/answer", response_model=AnswerResponse)
-async def submit_answer(sid: str, audio: UploadFile = File(...),
+async def submit_answer(sid: str, audio: UploadFile | None = File(default=None),
+                        text: str | None = Form(default=None),
+                        writing_sec: float | None = Form(default=None),
                         user: dict = Depends(get_current_user)):
+    """One answer, spoken or written. Exactly one of audio / text is required.
+
+    Spoken: the upload is transcribed with faster-whisper; duration is the
+    recording length. Written: the typed text is the transcript verbatim;
+    duration is the time the candidate spent writing (sent by the frontend),
+    so WPM is a writing pace and the turn is stored as answer_mode="written".
+    Both paths share filler stats, Gemini rubric scoring and the
+    retrieval-based next question.
+    """
     sess = db.get_user_session(sid, user["id"])
     if not sess:
         raise HTTPException(404, "session not found")
     if sess["status"] != "active":
         raise HTTPException(400, "session is already complete")
 
+    has_audio = audio is not None and bool(audio.filename)
+    typed = (text or "").strip()
+    if has_audio and typed:
+        raise HTTPException(400, "send either a recording or written text, not both")
+    if not has_audio and not typed:
+        raise HTTPException(400, "no answer received: record or write an answer first")
+
     turns = db.get_turns(sid)
     n = len(turns) + 1
     bank = get_bank(sess["role"])
+    domain = sess["domain"] or None
     qids = [t["question_id"] for t in turns]
     if n == 1:
-        question = bank.first_question(sess["difficulty"])
+        question = bank.first_question(sess["difficulty"], domain)
     else:
         # Re-derive the question the previous response served as next_question:
         # retrieval is deterministic in (transcript, asked_ids, difficulty).
-        question = bank.next_question(turns[-1]["transcript"], qids, sess["difficulty"])
+        question = bank.next_question(turns[-1]["transcript"], qids, sess["difficulty"], domain)
         if question is None:
             raise HTTPException(400, "question bank exhausted")
 
-    # persist the upload
-    os.makedirs(os.path.join(AUDIO_DIR, sid), exist_ok=True)
-    ext = os.path.splitext(audio.filename or "")[1].lower() or ".wav"
-    audio_path = os.path.join(AUDIO_DIR, sid, f"turn{n}{ext}")
-    with open(audio_path, "wb") as f:
-        f.write(await audio.read())
+    answer_mode = "spoken"
+    audio_path = ""
+    if typed:
+        answer_mode = "written"
+        transcript = typed[:5000]
+        duration = min(max(writing_sec or 0.0, 0.0), 3600.0)
+    else:
+        # persist the upload
+        os.makedirs(os.path.join(AUDIO_DIR, sid), exist_ok=True)
+        ext = os.path.splitext(audio.filename or "")[1].lower() or ".wav"
+        audio_path = os.path.join(AUDIO_DIR, sid, f"turn{n}{ext}")
+        with open(audio_path, "wb") as f:
+            f.write(await audio.read())
 
-    # AI half: speech-to-text, then local DS metrics
-    try:
-        transcript, duration = transcribe(audio_path)
-    except Exception as e:
-        log.exception("transcription failed")
-        raise HTTPException(500, f"transcription failed: {type(e).__name__}")
+        # AI half: speech-to-text, then local DS metrics
+        try:
+            transcript, duration = transcribe(audio_path)
+        except Exception as e:
+            log.exception("transcription failed")
+            raise HTTPException(500, f"transcription failed: {type(e).__name__}")
 
     wpm = analytics.compute_wpm(transcript, duration)
     filler = analytics.filler_word_stats(transcript)
@@ -171,12 +207,13 @@ async def submit_answer(sid: str, audio: UploadFile = File(...),
     scores, feedback, llm_status = evaluate(question, transcript)
 
     db.add_turn(sid, n, question, transcript, audio_path, duration, wpm,
-                filler["count"], filler["rate_per_100w"], scores, feedback, llm_status)
+                filler["count"], filler["rate_per_100w"], scores, feedback, llm_status,
+                answer_mode)
 
     complete = n >= TOTAL_TURNS
     next_q = None
     if not complete:
-        nxt = bank.next_question(transcript, qids + [question["id"]], sess["difficulty"])
+        nxt = bank.next_question(transcript, qids + [question["id"]], sess["difficulty"], domain)
         next_q = _qout(nxt) if nxt else None
         if next_q is None:
             complete = True
@@ -184,7 +221,8 @@ async def submit_answer(sid: str, audio: UploadFile = File(...),
         db.set_session_status(sid, "complete")
 
     return AnswerResponse(
-        turn=n, transcript=transcript, duration_sec=duration, wpm=wpm,
+        turn=n, transcript=transcript, answer_mode=answer_mode,
+        duration_sec=duration, wpm=wpm,
         filler=FillerStats(**filler),
         scores=ScoresOut(**scores) if scores else None,
         feedback=feedback, llm_status=llm_status,
@@ -201,7 +239,8 @@ def session_report(sid: str, user: dict = Depends(get_current_user)):
         TurnReport(
             n=t["n"], question=t["question"], question_id=t["question_id"],
             dimension=t["dimension"], difficulty=t["difficulty"],
-            transcript=t["transcript"], duration_sec=t["duration_sec"], wpm=t["wpm"],
+            transcript=t["transcript"], answer_mode=t.get("answer_mode") or "spoken",
+            duration_sec=t["duration_sec"], wpm=t["wpm"],
             filler_count=t["filler_count"], filler_rate=t["filler_rate"],
             scores=(ScoresOut(content_relevance=t["score_content"],
                               clarity_structure=t["score_clarity"],
@@ -213,6 +252,8 @@ def session_report(sid: str, user: dict = Depends(get_current_user)):
     ]
     return ReportResponse(
         session_id=sid, role=sess["role"], difficulty=sess["difficulty"],
+        domain=sess["domain"] or "", company=sess["company"] or "",
+        experience=sess["experience"] or "",
         status=sess["status"], created_at=sess["created_at"],
         total_turns=TOTAL_TURNS, turns=turn_reports,
         averages=analytics.dimension_breakdown(turns),
@@ -224,6 +265,8 @@ def session_history(user: dict = Depends(get_current_user)):
     return [
         SessionSummary(
             session_id=s["id"], role=s["role"], difficulty=s["difficulty"],
+            domain=s.get("domain") or "", company=s.get("company") or "",
+            experience=s.get("experience") or "",
             status=s["status"], created_at=s["created_at"],
             turns_answered=s["turns_answered"],
             avg_overall=(round(s["avg_overall"], 2) if s["avg_overall"] is not None else None),
