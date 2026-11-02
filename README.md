@@ -80,7 +80,7 @@ Auth is a secure HttpOnly cookie (`ic_session`); every `/api/sessions*` route
 requires login and is scoped to the logged-in user (another user's session id
 returns 404). Set `COOKIE_SECURE=1` in production so the cookie is HTTPS-only.
 
-Roles: `software_engineer`, `data_analyst`, `hr_general`.
+Roles: `software_engineer`, `data_analyst`, `hr_general`, `devops_engineer`, `cybersecurity_analyst`, `qa_engineer`.
 Difficulty: `easy`, `mixed`, `hard`. Sessions run 5 questions (`TOTAL_TURNS`).
 
 ### Try the API (needs an account; sessions are per-user)

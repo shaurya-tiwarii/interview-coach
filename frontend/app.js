@@ -17,11 +17,14 @@ const state = {
   recStart: 0, timerInt: null,
 };
 
-const ROLE_NAMES = { software_engineer: 'Software Engineer', data_analyst: 'Data Analyst', hr_general: 'HR / General' };
+const ROLE_NAMES = { software_engineer: 'Software Engineer', data_analyst: 'Data Analyst', hr_general: 'HR / General', devops_engineer: 'DevOps Engineer', cybersecurity_analyst: 'Cybersecurity Analyst', qa_engineer: 'QA Engineer' };
 const ROLE_BLURBS = {
   software_engineer: 'Data structures, systems and problem solving.',
   data_analyst: 'SQL, statistics and telling stories with data.',
   hr_general: 'Behavioral questions and communication.',
+  devops_engineer: 'CI/CD, containers, cloud and keeping systems up.',
+  cybersecurity_analyst: 'Threats, vulnerabilities and defending systems.',
+  qa_engineer: 'Test design, automation and shipping quality software.',
 };
 const DIM_LABELS = { content_relevance: 'Content', clarity_structure: 'Clarity', confidence: 'Confidence' };
 function dimLabel(slug) {
@@ -83,8 +86,7 @@ function renderNav() {
     : '<a class="btn btn-ghost btn-sm" href="#/login">Sign in</a>' +
       '<a class="btn btn-primary btn-sm" href="#/register">Get started</a>';
   nav.innerHTML =
-    '<a class="brand" href="#/"><span class="monogram">ST</span>' +
-    '<span class="brand-name">Interview Coach<small>by ST</small></span></a>' +
+    '<a class="brand" href="#/"><span class="brand-name">Interview Coach</span></a>' +
     '<nav class="nav-links">' + links + '</nav>' +
     '<div class="nav-cta">' + cta + '</div>';
 
@@ -103,8 +105,8 @@ function renderNav() {
 
 function renderFooter() {
   $('footer').innerHTML =
-    '<div class="footer-inner"><div class="footer-brand"><span class="monogram">ST</span>' +
-    '<span class="sig">Interview Coach<small>Designed and built by Shaurya Tiwari</small></span></div>' +
+    '<div class="footer-inner"><div class="footer-brand">' +
+    '<span class="sig">Interview Coach<small>Designed and developed by Shaurya Tiwari</small></span></div>' +
     '<div class="footer-links">' +
     (state.user
       ? '<a href="#/dashboard">Dashboard</a><a href="#/settings">Settings</a>'
@@ -189,7 +191,7 @@ function viewLanding(view) {
       '<a class="btn btn-ghost" href="#how">See how it works</a>' +
     '</div>' +
     '<div class="hero-meta rise rise-3">' +
-      '<span><b>3</b> roles</span><span><b>5</b> questions per round</span>' +
+      '<span><b>6</b> roles</span><span><b>5</b> questions per round</span>' +
       '<span><b>Whisper</b> transcription</span><span><b>AI</b> rubric scoring</span>' +
     '</div>' +
     '<div class="hero-panel rise rise-4" aria-hidden="true">' +
@@ -250,7 +252,7 @@ function view404(view) {
 /* ============ auth views ============ */
 function authShell(title, sub, inner) {
   return '<div class="wrap auth-wrap"><div class="auth-card rise">' +
-    '<div class="monogram">ST</div><h1>' + title + '</h1><p>' + sub + '</p>' +
+    '<h1>' + title + '</h1><p>' + sub + '</p>' +
     '<div class="form-error" id="formError"></div>' + inner + '</div></div>';
 }
 function pwField(id, label, autocomplete) {
@@ -353,8 +355,6 @@ async function viewDashboard(view) {
         d[0].toUpperCase() + d.slice(1) + '</button>').join('') +
     '</div>' +
     '<div class="field-row">' +
-      '<div class="field"><label for="domainSelect">Domain</label>' +
-      '<select class="input" id="domainSelect"><option value="">All domains</option></select></div>' +
       '<div class="field"><label for="companyInput">Target company (optional)</label>' +
       '<input class="input" id="companyInput" type="text" maxlength="80" placeholder="e.g. Acme Corp" value="' + escapeHtml(state.company) + '"></div>' +
       '<div class="field"><label for="expSelect">Experience (optional)</label>' +
@@ -373,36 +373,16 @@ async function viewDashboard(view) {
   view.querySelectorAll('#roleCards .role-card').forEach(c => c.addEventListener('click', () => {
     view.querySelectorAll('#roleCards .role-card').forEach(x => x.classList.remove('selected'));
     c.classList.add('selected'); state.role = c.dataset.role;
-    state.domain = ''; refreshDomainOptions();
+    state.domain = '';
   }));
   view.querySelectorAll('#diffPills .pill').forEach(p => p.addEventListener('click', () => {
     view.querySelectorAll('#diffPills .pill').forEach(x => x.classList.remove('selected'));
     p.classList.add('selected'); state.difficulty = p.dataset.diff;
   }));
-  $('domainSelect').addEventListener('change', e => { state.domain = e.target.value; });
   $('companyInput').addEventListener('input', e => { state.company = e.target.value; });
   $('expSelect').addEventListener('change', e => { state.experience = e.target.value; });
-  refreshDomainOptions();
-  loadDomains().then(refreshDomainOptions);
   $('startBtn').addEventListener('click', startInterview);
   loadStatsAndHistory(view);
-}
-
-function refreshDomainOptions() {
-  const sel = $('domainSelect');
-  if (!sel) return;
-  const dims = (state.domainsByRole && state.domainsByRole[state.role]) || [];
-  sel.innerHTML = '<option value="">All domains</option>' +
-    dims.map(d => '<option value="' + escapeHtml(d) + '"' + (state.domain === d ? ' selected' : '') + '>' + escapeHtml(dimLabel(d)) + '</option>').join('');
-  const hint = $('setupHint');
-  if (hint) hint.textContent = state.domain
-    ? 'Focused on ' + dimLabel(state.domain) + '. If the bank runs short on this domain, later questions widen out.'
-    : '';
-}
-
-async function loadDomains() {
-  try { state.domainsByRole = await api('/api/domains'); }
-  catch (e) { state.domainsByRole = null; }
 }
 
 async function loadStatsAndHistory(view) {

@@ -123,7 +123,8 @@ def stats(user: dict = Depends(get_current_user)):
 def domains(user: dict = Depends(get_current_user)):
     """Question dimensions (domains) available per role, from the banks."""
     return {role: get_bank(role).dimensions for role in
-            ("software_engineer", "data_analyst", "hr_general")}
+            ("software_engineer", "data_analyst", "hr_general",
+             "devops_engineer", "cybersecurity_analyst", "qa_engineer")}
 
 
 @app.post("/api/sessions", response_model=CreateSessionResponse)

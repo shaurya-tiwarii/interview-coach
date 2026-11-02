@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class CreateSessionRequest(BaseModel):
-    role: str = Field(pattern=r"^(software_engineer|data_analyst|hr_general)$")
+    role: str = Field(pattern=r"^(software_engineer|data_analyst|hr_general|devops_engineer|cybersecurity_analyst|qa_engineer)$")
     difficulty: str = Field(default="mixed", pattern=r"^(easy|mixed|hard)$")
     # Optional setup fields. domain is one dimension slug from the role's
     # question bank ("" means all domains); company is free text.

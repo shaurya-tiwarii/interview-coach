@@ -24,6 +24,9 @@ ROLE_FILES = {
     "software_engineer": "questions_software_engineer.json",
     "data_analyst": "questions_data_analyst.json",
     "hr_general": "questions_hr_general.json",
+    "devops_engineer": "questions_devops_engineer.json",
+    "cybersecurity_analyst": "questions_cybersecurity_analyst.json",
+    "qa_engineer": "questions_qa_engineer.json",
 }
 
 # Valid difficulty tags in the bank files.
